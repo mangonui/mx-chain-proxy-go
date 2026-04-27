@@ -54,7 +54,7 @@ func (nsp *NodeStatusProcessor) StartCacheUpdate() {
 	var ctx context.Context
 	ctx, nsp.cancelFunc = context.WithCancel(context.Background())
 
-	go func(ctx context.Context) {
+	runGuardedBackgroundTask("NodeStatusProcessor.StartCacheUpdate", func() {
 		timer := time.NewTimer(nsp.cacheValidityDuration)
 		defer timer.Stop()
 
@@ -73,7 +73,7 @@ func (nsp *NodeStatusProcessor) StartCacheUpdate() {
 				return
 			}
 		}
-	}(ctx)
+	})
 }
 
 func (nsp *NodeStatusProcessor) handleCacheUpdate(countConsecutiveFails *int) {

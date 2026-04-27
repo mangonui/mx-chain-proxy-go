@@ -37,8 +37,18 @@ func NewStatusGroup(facadeHandler data.FacadeHandler) (*statusGroup, error) {
 // getMetrics will expose endpoints statistics in json format
 func (group *statusGroup) getMetrics(c *gin.Context) {
 	metricsResults := group.facade.GetMetrics()
+	drwaMetrics := group.facade.GetDRWAMetrics()
 
-	shared.RespondWith(c, http.StatusOK, gin.H{"metrics": metricsResults}, "", data.ReturnCodeSuccess)
+	shared.RespondWith(
+		c,
+		http.StatusOK,
+		gin.H{
+			"metrics":     metricsResults,
+			"drwaMetrics": drwaMetrics,
+		},
+		"",
+		data.ReturnCodeSuccess,
+	)
 }
 
 // getPrometheusMetrics will expose proxy metrics in prometheus format

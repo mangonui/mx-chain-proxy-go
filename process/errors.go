@@ -115,3 +115,6 @@ var ErrNilHttpClient = errors.New("nil http client")
 
 // ErrNilTimedCache signals that a nil timed cache has been provided
 var ErrNilTimedCache = errors.New("nil timed cache")
+
+// ErrResponseBodyTooLarge signals that an upstream HTTP response body exceeded the allowed size
+var ErrResponseBodyTooLarge = errors.New("response body too large")

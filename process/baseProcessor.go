@@ -22,13 +22,26 @@ import (
 )
 
 var log = logger.GetOrCreate("process")
-var mutHttpClient sync.RWMutex
 
 const (
 	nodeSyncedNonceDifferenceThreshold = 10
 	stepDelayForCheckingNodesSyncState = 1 * time.Minute
 	timeoutDurationForNodeStatus       = 2 * time.Second
+	maxUpstreamResponseBodyBytes       = 4 << 20
 )
+
+func readResponseBodyLimited(body io.Reader) ([]byte, error) {
+	limitedReader := io.LimitReader(body, maxUpstreamResponseBodyBytes+1)
+	responseBodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(responseBodyBytes)) > maxUpstreamResponseBodyBytes {
+		return nil, ErrResponseBodyTooLarge
+	}
+
+	return responseBodyBytes, nil
+}
 
 // BaseProcessor represents an implementation of CoreProcessor that helps to process requests
 type BaseProcessor struct {
@@ -72,10 +85,9 @@ func NewBaseProcessor(
 		return nil, ErrNilPubKeyConverter
 	}
 
-	httpClient := http.DefaultClient
-	mutHttpClient.Lock()
-	httpClient.Timeout = time.Duration(requestTimeoutSec) * time.Second
-	mutHttpClient.Unlock()
+	httpClient := &http.Client{
+		Timeout: time.Duration(requestTimeoutSec) * time.Second,
+	}
 
 	bp := &BaseProcessor{
 		shardCoordinator:               shardCoord,
@@ -107,7 +119,9 @@ func (bp *BaseProcessor) StartNodesSyncStateChecks() {
 	var ctx context.Context
 	ctx, bp.cancelFunc = context.WithCancel(context.Background())
 
-	go bp.handleOutOfSyncNodes(ctx)
+	runGuardedBackgroundTask("BaseProcessor.handleOutOfSyncNodes", func() {
+		bp.handleOutOfSyncNodes(ctx)
+	})
 }
 
 // GetShardIDs will return the shard IDs slice
@@ -224,7 +238,7 @@ func (bp *BaseProcessor) CallGetRestEndPoint(
 		}
 	}()
 
-	responseBodyBytes, err := io.ReadAll(resp.Body)
+	responseBodyBytes, err := readResponseBodyLimited(resp.Body)
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}
@@ -283,7 +297,7 @@ func (bp *BaseProcessor) CallPostRestEndPoint(
 		}
 	}()
 
-	responseBodyBytes, err := io.ReadAll(resp.Body)
+	responseBodyBytes, err := readResponseBodyLimited(resp.Body)
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}
@@ -472,7 +486,7 @@ func (bp *BaseProcessor) getNodeStatusResponseFromAPI(url string) (*proxyData.No
 		return nil, resp.StatusCode, nil
 	}
 
-	responseBodyBytes, err := io.ReadAll(resp.Body)
+	responseBodyBytes, err := readResponseBodyLimited(resp.Body)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}

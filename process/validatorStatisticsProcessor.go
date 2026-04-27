@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/multiversx/mx-chain-core-go/core"
@@ -19,6 +20,7 @@ type ValidatorStatisticsProcessor struct {
 	proc                  Processor
 	cacher                ValidatorStatisticsCacheHandler
 	cacheValidityDuration time.Duration
+	mutLifecycle          sync.Mutex
 	cancelFunc            func()
 }
 
@@ -79,6 +81,9 @@ func (vsp *ValidatorStatisticsProcessor) getValidatorStatisticsFromApi() (*data.
 
 // StartCacheUpdate will start the updating of the cache from the API at a given period
 func (vsp *ValidatorStatisticsProcessor) StartCacheUpdate() {
+	vsp.mutLifecycle.Lock()
+	defer vsp.mutLifecycle.Unlock()
+
 	if vsp.cancelFunc != nil {
 		log.Error("ValidatorStatisticsProcessor - cache update already started")
 		return
@@ -87,7 +92,7 @@ func (vsp *ValidatorStatisticsProcessor) StartCacheUpdate() {
 	var ctx context.Context
 	ctx, vsp.cancelFunc = context.WithCancel(context.Background())
 
-	go func(ctx context.Context) {
+	runGuardedBackgroundTask("ValidatorStatisticsProcessor.StartCacheUpdate", func() {
 		timer := time.NewTimer(vsp.cacheValidityDuration)
 		defer timer.Stop()
 
@@ -104,7 +109,7 @@ func (vsp *ValidatorStatisticsProcessor) StartCacheUpdate() {
 				return
 			}
 		}
-	}(ctx)
+	})
 }
 
 func (vsp *ValidatorStatisticsProcessor) handleCacheUpdate() {
@@ -123,8 +128,12 @@ func (vsp *ValidatorStatisticsProcessor) handleCacheUpdate() {
 
 // Close will handle the closing of the cache update go routine
 func (vsp *ValidatorStatisticsProcessor) Close() error {
+	vsp.mutLifecycle.Lock()
+	defer vsp.mutLifecycle.Unlock()
+
 	if vsp.cancelFunc != nil {
 		vsp.cancelFunc()
+		vsp.cancelFunc = nil
 	}
 
 	return nil

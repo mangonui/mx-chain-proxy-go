@@ -15,11 +15,14 @@ import (
 // interfaces assertions. verifies that all API endpoint have their corresponding methods in the facade
 var _ groups.ActionsFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.AccountsFacadeHandler = (*ProxyFacade)(nil)
+var _ groups.AboutFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.BlockFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.BlocksFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.HyperBlockFacadeHandler = (*ProxyFacade)(nil)
+var _ groups.InternalFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.NetworkFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.NodeFacadeHandler = (*ProxyFacade)(nil)
+var _ groups.StatusFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.TransactionFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.ValidatorFacadeHandler = (*ProxyFacade)(nil)
 var _ groups.VmValuesFacadeHandler = (*ProxyFacade)(nil)
@@ -493,6 +496,11 @@ func (pf *ProxyFacade) VerifyProof(rootHash string, address string, proof []stri
 // GetMetrics will return the status metrics
 func (pf *ProxyFacade) GetMetrics() map[string]*data.EndpointMetrics {
 	return pf.statusProc.GetMetrics()
+}
+
+// GetDRWAMetrics returns the DRWA-specific proxy observability counters.
+func (pf *ProxyFacade) GetDRWAMetrics() map[string]uint64 {
+	return pf.statusProc.GetDRWAMetrics()
 }
 
 // GetMetricsForPrometheus will return the status metrics in a prometheus format

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/multiversx/mx-chain-core-go/core"
@@ -628,8 +629,8 @@ func startWebServer(
 }
 
 func waitForServerShutdown(httpServer *http.Server, closableComponents *data.ClosableComponentsHandler) {
-	quit := make(chan os.Signal)
-	signal.Notify(quit, os.Interrupt, os.Kill)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
 	closableComponents.Close()

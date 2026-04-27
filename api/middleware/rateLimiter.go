@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"container/list"
 	"fmt"
 	"net/http"
 	"sync"
@@ -13,11 +14,20 @@ import (
 // ReturnCodeRequestError defines a request which hasn't been executed successfully due to a bad request received
 const ReturnCodeRequestError string = "bad_request"
 
+const defaultMaxTrackedKeysPerWindow = 100000
+
+type rateLimiterEntry struct {
+	requests uint64
+	element  *list.Element
+}
+
 type rateLimiter struct {
-	requestsMap    map[string]uint64
+	requestsMap    map[string]*rateLimiterEntry
+	admissionOrder *list.List
 	mutRequestsMap sync.RWMutex
 	limits         map[string]uint64
 	countDuration  time.Duration
+	maxTrackedKeys int
 }
 
 // NewRateLimiter returns a new instance of rateLimiter
@@ -26,9 +36,11 @@ func NewRateLimiter(limits map[string]uint64, countDuration time.Duration) (*rat
 		return nil, ErrNilLimitsMapForEndpoints
 	}
 	return &rateLimiter{
-		requestsMap:   make(map[string]uint64),
-		limits:        limits,
-		countDuration: countDuration,
+		requestsMap:    make(map[string]*rateLimiterEntry),
+		admissionOrder: list.New(),
+		limits:         limits,
+		countDuration:  countDuration,
+		maxTrackedKeys: defaultMaxTrackedKeysPerWindow,
 	}, nil
 }
 
@@ -39,6 +51,7 @@ func (rl *rateLimiter) MiddlewareHandlerFunc() gin.HandlerFunc {
 
 		limitForEndpoint, isEndpointLimited := rl.limits[endpoint]
 		if !isEndpointLimited {
+			c.Next()
 			return
 		}
 
@@ -53,7 +66,10 @@ func (rl *rateLimiter) MiddlewareHandlerFunc() gin.HandlerFunc {
 				Error: printMessage,
 				Code:  data.ReturnCode(ReturnCodeRequestError),
 			})
+			return
 		}
+
+		c.Next()
 	}
 }
 
@@ -61,22 +77,48 @@ func (rl *rateLimiter) addInRequestsMap(key string) uint64 {
 	rl.mutRequestsMap.Lock()
 	defer rl.mutRequestsMap.Unlock()
 
-	_, ok := rl.requestsMap[key]
-	if !ok {
-		rl.requestsMap[key] = 1
-		return 1
+	entry, ok := rl.requestsMap[key]
+	if ok {
+		entry.requests++
+		rl.admissionOrder.MoveToBack(entry.element)
+		return entry.requests
 	}
 
-	rl.requestsMap[key]++
+	if len(rl.requestsMap) >= rl.maxTrackedKeys {
+		rl.evictOldestTrackedKey()
+	}
 
-	return rl.requestsMap[key]
+	element := rl.admissionOrder.PushBack(key)
+	rl.requestsMap[key] = &rateLimiterEntry{
+		requests: 1,
+		element:  element,
+	}
+
+	return 1
+}
+
+func (rl *rateLimiter) evictOldestTrackedKey() {
+	oldest := rl.admissionOrder.Front()
+	if oldest == nil {
+		return
+	}
+
+	key, ok := oldest.Value.(string)
+	if !ok {
+		rl.admissionOrder.Remove(oldest)
+		return
+	}
+
+	delete(rl.requestsMap, key)
+	rl.admissionOrder.Remove(oldest)
 }
 
 // ResetMap has to be called from outside at a given interval so the requests map will be cleaned and older restrictions
 // would be erased
 func (rl *rateLimiter) ResetMap(version string) {
 	rl.mutRequestsMap.Lock()
-	rl.requestsMap = make(map[string]uint64)
+	rl.requestsMap = make(map[string]*rateLimiterEntry)
+	rl.admissionOrder = list.New()
 	rl.mutRequestsMap.Unlock()
 
 	log.Info("rate limiter map has been reset", "version", version, "time", time.Now())

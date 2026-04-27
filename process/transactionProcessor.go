@@ -205,6 +205,15 @@ func (tp *TransactionProcessor) SimulateTransaction(tx *data.Transaction, checkS
 	if err != nil {
 		return nil, fmt.Errorf("%w while trying to simulate on sender shard (shard %d)", err, senderShardID)
 	}
+	response.Data.Result.Drwa = materializeDRWADetails(
+		response.Data.Result.FailReason,
+		response.Data.Result.ScResults,
+		"",
+	)
+	response.Data.Result.Mrv = materializeMRVDetails(
+		response.Data.Result.ScResults,
+		"",
+	)
 
 	receiverBuff, err := tp.pubKeyConverter.Decode(tx.Receiver)
 	if err != nil {
@@ -233,6 +242,15 @@ func (tp *TransactionProcessor) SimulateTransaction(tx *data.Transaction, checkS
 	if err != nil {
 		return nil, fmt.Errorf("%w while trying to simulate on receiver shard (shard %d)", err, receiverShardID)
 	}
+	responseFromReceiverShard.Data.Result.Drwa = materializeDRWADetails(
+		responseFromReceiverShard.Data.Result.FailReason,
+		responseFromReceiverShard.Data.Result.ScResults,
+		"",
+	)
+	responseFromReceiverShard.Data.Result.Mrv = materializeMRVDetails(
+		responseFromReceiverShard.Data.Result.ScResults,
+		"",
+	)
 
 	simulationResult := data.ResponseTransactionSimulationCrossShard{}
 	simulationResult.Data.Result = map[string]data.TransactionSimulationResults{
@@ -287,9 +305,6 @@ func (tp *TransactionProcessor) simulateTransaction(
 func (tp *TransactionProcessor) SendMultipleTransactions(txs []*data.Transaction) (
 	data.MultipleTransactionsResponseData, error,
 ) {
-	// TODO: Analyze and improve the robustness of this function. Currently, an error within `GetObservers`
-	// breaks the function and returns nothing (but an error) even if some transactions were actually sent, successfully.
-
 	totalTxsSent := uint64(0)
 	txsToSend := make([]*data.Transaction, 0)
 	for i := 0; i < len(txs); i++ {
@@ -310,12 +325,20 @@ func (tp *TransactionProcessor) SendMultipleTransactions(txs []*data.Transaction
 
 	txsHashes := make(map[int]string)
 	txsByShardID := tp.groupTxsByShard(txsToSend)
+	var firstErr error
 	for shardID, groupOfTxs := range txsByShardID {
 		observersInShard, err := tp.proc.GetObservers(shardID, data.AvailabilityRecent)
 		if err != nil {
-			return data.MultipleTransactionsResponseData{}, ErrMissingObserver
+			log.Warn("could not get observers for transaction batch shard",
+				"shard ID", shardID,
+				"error", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%w for shard %d", ErrMissingObserver, shardID)
+			}
+			continue
 		}
 
+		sentForShard := false
 		for _, observer := range observersInShard {
 			txResponse := &data.ResponseMultipleTransactions{}
 			respCode, err := tp.proc.CallPostRestEndPoint(observer.Address, MultipleTransactionsPath, groupOfTxs, txResponse)
@@ -331,17 +354,28 @@ func (tp *TransactionProcessor) SendMultipleTransactions(txs []*data.Transaction
 					txsHashes[groupOfTxs[key].Index] = hash
 				}
 
+				sentForShard = true
 				break
 			}
 
 			log.LogIfError(err)
 		}
+
+		if !sentForShard && firstErr == nil {
+			firstErr = fmt.Errorf("%w for shard %d", ErrSendingRequest, shardID)
+		}
 	}
 
-	return data.MultipleTransactionsResponseData{
+	response := data.MultipleTransactionsResponseData{
 		NumOfTxs:  totalTxsSent,
 		TxsHashes: txsHashes,
-	}, nil
+	}
+
+	if firstErr != nil {
+		return response, firstErr
+	}
+
+	return response, nil
 }
 
 // TransactionCostRequest should return how many gas units a transaction will cost

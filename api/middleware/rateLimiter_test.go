@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -114,6 +115,66 @@ func TestRateLimiter_EndpointNotLimitedShouldNotRaiseRestrictions(t *testing.T) 
 	resp = httptest.NewRecorder()
 	ws.ServeHTTP(resp, req)
 	assert.Equal(t, http.StatusOK, resp.Code)
+}
+
+func TestRateLimiter_EndpointNotLimitedStillCallsNextHandler(t *testing.T) {
+	t.Parallel()
+
+	rl, err := NewRateLimiter(map[string]uint64{"/limited": 1}, time.Millisecond)
+	require.NoError(t, err)
+
+	engine := gin.New()
+	var called atomic.Bool
+	engine.Use(rl.MiddlewareHandlerFunc())
+	engine.GET("/open", func(c *gin.Context) {
+		called.Store(true)
+		c.Status(http.StatusNoContent)
+	})
+
+	req, err := http.NewRequest(http.MethodGet, "/open", nil)
+	require.NoError(t, err)
+	resp := httptest.NewRecorder()
+	engine.ServeHTTP(resp, req)
+
+	require.True(t, called.Load())
+	require.Equal(t, http.StatusNoContent, resp.Code)
+}
+
+func TestRateLimiter_TrackedKeyCountIsBounded(t *testing.T) {
+	t.Parallel()
+
+	rl, err := NewRateLimiter(map[string]uint64{"/limited": 10}, time.Millisecond)
+	require.NoError(t, err)
+
+	rl.maxTrackedKeys = 2
+
+	require.Equal(t, uint64(1), rl.addInRequestsMap("/limited_1.1.1.1"))
+	require.Equal(t, uint64(1), rl.addInRequestsMap("/limited_2.2.2.2"))
+	require.Len(t, rl.requestsMap, 2)
+
+	require.Equal(t, uint64(1), rl.addInRequestsMap("/limited_3.3.3.3"))
+	require.Len(t, rl.requestsMap, 2)
+	_, oldestStillTracked := rl.requestsMap["/limited_1.1.1.1"]
+	require.False(t, oldestStillTracked, "oldest tracked key should be evicted once the admission cap is reached")
+}
+
+func TestRateLimiter_ExistingTrackedKeyMovesToBackOnAccess(t *testing.T) {
+	t.Parallel()
+
+	rl, err := NewRateLimiter(map[string]uint64{"/limited": 10}, time.Millisecond)
+	require.NoError(t, err)
+
+	rl.maxTrackedKeys = 2
+
+	require.Equal(t, uint64(1), rl.addInRequestsMap("/limited_1.1.1.1"))
+	require.Equal(t, uint64(1), rl.addInRequestsMap("/limited_2.2.2.2"))
+	require.Equal(t, uint64(2), rl.addInRequestsMap("/limited_1.1.1.1"))
+	require.Equal(t, uint64(1), rl.addInRequestsMap("/limited_3.3.3.3"))
+
+	_, firstKeyStillTracked := rl.requestsMap["/limited_1.1.1.1"]
+	require.True(t, firstKeyStillTracked, "recently used key should remain tracked under cap pressure")
+	_, secondKeyStillTracked := rl.requestsMap["/limited_2.2.2.2"]
+	require.False(t, secondKeyStillTracked, "least recently used key should be evicted under cap pressure")
 }
 
 func startProxyServer(group data.GroupHandler, rateLimiter RateLimiterHandler, rateLimit uint64, path string) *gin.Engine {

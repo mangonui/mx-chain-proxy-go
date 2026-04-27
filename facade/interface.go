@@ -140,6 +140,7 @@ type FaucetProcessor interface {
 // StatusProcessor defines what a component which will handle status request should do
 type StatusProcessor interface {
 	GetMetrics() map[string]*data.EndpointMetrics
+	GetDRWAMetrics() map[string]uint64
 	GetMetricsForPrometheus() string
 }
 

@@ -26,6 +26,19 @@ func createMockArgNumShardsProcessor() ArgNumShardsProcessor {
 	}
 }
 
+func makeNumShardsProcessorWithTestDurations(t *testing.T, args ArgNumShardsProcessor, between, timeout, request time.Duration) *numShardsProcessor {
+	t.Helper()
+
+	proc, err := NewNumShardsProcessor(args)
+	require.NoError(t, err)
+
+	proc.timeBetweenNodesRequests = between
+	proc.numShardsTimeout = timeout
+	proc.requestTimeout = request
+
+	return proc
+}
+
 func TestNewNumShardsProcessor(t *testing.T) {
 	t.Parallel()
 
@@ -99,17 +112,11 @@ func TestNumShardsProcessor_GetNetworkNumShards(t *testing.T) {
 		t.Parallel()
 
 		args := createMockArgNumShardsProcessor()
-		args.TimeBetweenNodesRequestsInSec = 30
-		args.NumShardsTimeoutInSec = 30
-
-		proc, err := NewNumShardsProcessor(args)
-		require.NoError(t, err)
+		proc := makeNumShardsProcessorWithTestDurations(t, args, 10*time.Millisecond, 50*time.Millisecond, 10*time.Millisecond)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			time.Sleep(time.Millisecond * 200)
-			cancel()
-		}()
+		cancel()
+
 		numShards, err := proc.GetNetworkNumShards(ctx)
 		require.Equal(t, errTimeIsOut, err)
 		require.Zero(t, numShards)
@@ -118,11 +125,8 @@ func TestNumShardsProcessor_GetNetworkNumShards(t *testing.T) {
 		t.Parallel()
 
 		args := createMockArgNumShardsProcessor()
-		args.TimeBetweenNodesRequestsInSec = 30
-		args.NumShardsTimeoutInSec = 1
+		proc := makeNumShardsProcessorWithTestDurations(t, args, 10*time.Millisecond, 15*time.Millisecond, 10*time.Millisecond)
 
-		proc, err := NewNumShardsProcessor(args)
-		require.NoError(t, err)
 		numShards, err := proc.GetNetworkNumShards(context.Background())
 		require.True(t, errors.Is(err, errTimeIsOut))
 		require.Zero(t, numShards)
@@ -140,8 +144,6 @@ func TestNumShardsProcessor_GetNetworkNumShards(t *testing.T) {
 		providedBodyBuff, _ := json.Marshal(providedBody)
 
 		args := createMockArgNumShardsProcessor()
-		args.TimeBetweenNodesRequestsInSec = 1
-		args.NumShardsTimeoutInSec = 15
 		cnt := 0
 		args.HttpClient = &mock.HttpClientMock{
 			DoCalled: func(req *http.Request) (*http.Response, error) {
@@ -167,10 +169,49 @@ func TestNumShardsProcessor_GetNetworkNumShards(t *testing.T) {
 			},
 		}
 
-		proc, err := NewNumShardsProcessor(args)
-		require.NoError(t, err)
+		proc := makeNumShardsProcessorWithTestDurations(t, args, 5*time.Millisecond, 250*time.Millisecond, 50*time.Millisecond)
 		numShards, err := proc.GetNetworkNumShards(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, uint32(2), numShards)
 	})
+	t.Run("oversized_response_body_should_be_rejected", func(t *testing.T) {
+		t.Parallel()
+
+		args := createMockArgNumShardsProcessor()
+		args.HttpClient = &mock.HttpClientMock{
+			DoCalled: func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("a"), 5<<20))),
+				}, nil
+			},
+		}
+
+		proc := makeNumShardsProcessorWithTestDurations(t, args, 2*time.Millisecond, 10*time.Millisecond, 10*time.Millisecond)
+
+		numShards, err := proc.GetNetworkNumShards(context.Background())
+		require.ErrorIs(t, err, errTimeIsOut)
+		require.Zero(t, numShards)
+	})
+}
+
+func TestNumShardsProcessor_TryGetnumShardsFromObserverBodyTooLarge(t *testing.T) {
+	t.Parallel()
+
+	args := createMockArgNumShardsProcessor()
+	args.HttpClient = &mock.HttpClientMock{
+		DoCalled: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("a"), 5<<20))),
+			}, nil
+		},
+	}
+
+	proc, err := NewNumShardsProcessor(args)
+	require.NoError(t, err)
+
+	numShards, statusCode := proc.tryGetnumShardsFromObserver("http://observer")
+	require.Zero(t, numShards)
+	require.Equal(t, http.StatusInternalServerError, statusCode)
 }

@@ -14,7 +14,8 @@ import (
 
 type statusMetricsResponse struct {
 	Data struct {
-		Metrics map[string]*data.EndpointMetrics `json:"metrics"`
+		Metrics     map[string]*data.EndpointMetrics `json:"metrics"`
+		DRWAMetrics map[string]uint64                `json:"drwaMetrics"`
 	}
 	Error string `json:"error"`
 	Code  string `json:"code"`
@@ -43,9 +44,15 @@ func TestGetMetrics_ShouldWork(t *testing.T) {
 			HighestResponseTime: 50,
 		},
 	}
+	expectedDRWAMetrics := map[string]uint64{
+		"drwa_signal_accepted": 2,
+	}
 	facade := &mock.FacadeStub{
 		GetMetricsCalled: func() map[string]*data.EndpointMetrics {
 			return expectedMetrics
+		},
+		GetDRWAMetricsCalled: func() map[string]uint64 {
+			return expectedDRWAMetrics
 		},
 	}
 
@@ -62,6 +69,7 @@ func TestGetMetrics_ShouldWork(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.Code)
 
 	require.Equal(t, expectedMetrics, apiResp.Data.Metrics)
+	require.Equal(t, expectedDRWAMetrics, apiResp.Data.DRWAMetrics)
 }
 
 func TestGetPrometheusMetrics_ShouldWork(t *testing.T) {

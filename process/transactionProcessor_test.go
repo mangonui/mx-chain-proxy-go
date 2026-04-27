@@ -457,6 +457,109 @@ func TestTransactionProcessor_SendMultipleTransactionsShouldWorkAndSendTxsByShar
 	)
 }
 
+func TestTransactionProcessor_SendMultipleTransactionsReturnsPartialSuccessWhenLaterShardHasNoObservers(t *testing.T) {
+	t.Parallel()
+
+	var txsToSend []*data.Transaction
+	sndrShard0 := hex.EncodeToString([]byte("bbbbbb"))
+	sndrShard1 := hex.EncodeToString([]byte("cccccc"))
+	txsToSend = append(txsToSend, &data.Transaction{Receiver: "aaaaaa", Sender: sndrShard0, ChainID: "chain", Version: 1})
+	txsToSend = append(txsToSend, &data.Transaction{Receiver: "aaaaaa", Sender: sndrShard1, ChainID: "chain", Version: 1})
+
+	tp, _ := process.NewTransactionProcessor(
+		&mock.ProcessorStub{
+			ComputeShardIdCalled: func(addressBuff []byte) (uint32, error) {
+				sndrHex := hex.EncodeToString(addressBuff)
+				if sndrHex == sndrShard0 {
+					return uint32(0), nil
+				}
+				if sndrHex == sndrShard1 {
+					return uint32(1), nil
+				}
+				return 0, nil
+			},
+			GetObserversCalled: func(shardID uint32, _ data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
+				if shardID == 0 {
+					return []*data.NodeData{{Address: "observer0", ShardId: 0}}, nil
+				}
+				return nil, errors.New("missing observers for shard")
+			},
+			CallPostRestEndPointCalled: func(address string, path string, value interface{}, response interface{}) (int, error) {
+				resp := response.(*data.ResponseMultipleTransactions)
+				resp.Data.NumOfTxs = 1
+				resp.Data.TxsHashes = map[int]string{
+					0: "hash0",
+				}
+				return http.StatusOK, nil
+			},
+		},
+		&mock.PubKeyConverterMock{},
+		hasher,
+		marshalizer,
+		funcNewTxCostHandler,
+		logsMerger,
+		true,
+	)
+
+	response, err := tp.SendMultipleTransactions(txsToSend)
+	require.Error(t, err)
+	require.ErrorIs(t, err, process.ErrMissingObserver)
+	require.Equal(t, uint64(1), response.NumOfTxs)
+	require.Equal(t, map[int]string{0: "hash0"}, response.TxsHashes)
+}
+
+func TestTransactionProcessor_SendMultipleTransactionsReturnsPartialSuccessWhenShardSendFails(t *testing.T) {
+	t.Parallel()
+
+	var txsToSend []*data.Transaction
+	sndrShard0 := hex.EncodeToString([]byte("bbbbbb"))
+	sndrShard1 := hex.EncodeToString([]byte("cccccc"))
+	txsToSend = append(txsToSend, &data.Transaction{Receiver: "aaaaaa", Sender: sndrShard0, ChainID: "chain", Version: 1})
+	txsToSend = append(txsToSend, &data.Transaction{Receiver: "aaaaaa", Sender: sndrShard1, ChainID: "chain", Version: 1})
+
+	tp, _ := process.NewTransactionProcessor(
+		&mock.ProcessorStub{
+			ComputeShardIdCalled: func(addressBuff []byte) (uint32, error) {
+				sndrHex := hex.EncodeToString(addressBuff)
+				if sndrHex == sndrShard0 {
+					return uint32(0), nil
+				}
+				if sndrHex == sndrShard1 {
+					return uint32(1), nil
+				}
+				return 0, nil
+			},
+			GetObserversCalled: func(shardID uint32, _ data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
+				return []*data.NodeData{{Address: fmt.Sprintf("observer%d", shardID), ShardId: shardID}}, nil
+			},
+			CallPostRestEndPointCalled: func(address string, path string, value interface{}, response interface{}) (int, error) {
+				if address == "observer0" {
+					resp := response.(*data.ResponseMultipleTransactions)
+					resp.Data.NumOfTxs = 1
+					resp.Data.TxsHashes = map[int]string{
+						0: "hash0",
+					}
+					return http.StatusOK, nil
+				}
+
+				return http.StatusNotFound, errors.New("observer unavailable")
+			},
+		},
+		&mock.PubKeyConverterMock{},
+		hasher,
+		marshalizer,
+		funcNewTxCostHandler,
+		logsMerger,
+		true,
+	)
+
+	response, err := tp.SendMultipleTransactions(txsToSend)
+	require.Error(t, err)
+	require.ErrorIs(t, err, process.ErrSendingRequest)
+	require.Equal(t, uint64(1), response.NumOfTxs)
+	require.Equal(t, map[int]string{0: "hash0"}, response.TxsHashes)
+}
+
 func TestTransactionProcessor_SimulateTransactionShouldWork(t *testing.T) {
 	t.Parallel()
 

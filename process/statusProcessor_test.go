@@ -60,6 +60,9 @@ func TestStatusProcessor_GetMetrics(t *testing.T) {
 func TestStatusProcessor_GetMetricsForPrometheus(t *testing.T) {
 	t.Parallel()
 
+	resetProxyDRWAMetrics()
+	t.Cleanup(resetProxyDRWAMetrics)
+
 	expectedOutput := "metrics"
 	statusProvider := &mock.StatusMetricsProviderStub{
 		GetMetricsForPrometheusCalled: func() string {
@@ -73,4 +76,36 @@ func TestStatusProcessor_GetMetricsForPrometheus(t *testing.T) {
 	metrics := sp.GetMetricsForPrometheus()
 	require.NoError(t, err)
 	require.Equal(t, expectedOutput, metrics)
+}
+
+func TestStatusProcessor_GetDRWAMetrics(t *testing.T) {
+	resetProxyDRWAMetrics()
+	t.Cleanup(resetProxyDRWAMetrics)
+	recordProxyDRWAMetric("drwa_signal_accepted")
+	recordProxyDRWAMetric("drwa_signal_accepted")
+
+	sp, err := NewStatusProcessor(&mock.ProcessorStub{}, &mock.StatusMetricsProviderStub{})
+	require.NoError(t, err)
+
+	metrics := sp.GetDRWAMetrics()
+	require.Equal(t, uint64(2), metrics["drwa_signal_accepted"])
+}
+
+func TestStatusProcessor_GetMetricsForPrometheus_AppendsProxyObservabilityCounters(t *testing.T) {
+	resetProxyDRWAMetrics()
+	t.Cleanup(resetProxyDRWAMetrics)
+
+	recordProxyDRWAMetric("drwa_signal_accepted")
+
+	statusProvider := &mock.StatusMetricsProviderStub{
+		GetMetricsForPrometheusCalled: func() string {
+			return "base_metric 1\n"
+		},
+	}
+	sp, err := NewStatusProcessor(&mock.ProcessorStub{}, statusProvider)
+	require.NoError(t, err)
+
+	metrics := sp.GetMetricsForPrometheus()
+	require.Contains(t, metrics, "base_metric 1")
+	require.Contains(t, metrics, `proxy_drwa{metric="drwa_signal_accepted"} 1`)
 }

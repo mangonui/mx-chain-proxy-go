@@ -190,3 +190,38 @@ func TestValidatorStatisticsProcessor_CacheShouldUpdate(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	assert.Equal(t, int32(3), atomic.LoadInt32(&numOfTimesHttpWasCalled))
 }
+
+func TestValidatorStatisticsProcessor_CloseAllowsRestart(t *testing.T) {
+	t.Parallel()
+
+	numOfTimesHttpWasCalled := int32(0)
+	cacher := &mock.ValStatsCacherMock{}
+	hp, err := process.NewValidatorStatisticsProcessor(&mock.ProcessorStub{
+		GetObserversCalled: func(_ uint32, _ data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
+			return []*data.NodeData{{Address: "obs1", ShardId: core.MetachainShardId}}, nil
+		},
+		CallGetRestEndPointCalled: func(address string, path string, value interface{}) (int, error) {
+			atomic.AddInt32(&numOfTimesHttpWasCalled, 1)
+			return 0, nil
+		},
+	},
+		cacher,
+		20*time.Millisecond)
+
+	assert.Nil(t, err)
+
+	hp.StartCacheUpdate()
+	time.Sleep(25 * time.Millisecond)
+	firstRunCalls := atomic.LoadInt32(&numOfTimesHttpWasCalled)
+	assert.GreaterOrEqual(t, firstRunCalls, int32(2))
+
+	assert.Nil(t, hp.Close())
+
+	time.Sleep(25 * time.Millisecond)
+	callsAfterClose := atomic.LoadInt32(&numOfTimesHttpWasCalled)
+
+	hp.StartCacheUpdate()
+	time.Sleep(25 * time.Millisecond)
+
+	assert.Greater(t, atomic.LoadInt32(&numOfTimesHttpWasCalled), callsAfterClose)
+}

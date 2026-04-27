@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -84,24 +83,44 @@ func checkArgs(args ArgNumShardsProcessor) error {
 func (processor *numShardsProcessor) GetNetworkNumShards(ctx context.Context) (uint32, error) {
 	log.Info("getting the number of shards from observers...")
 
+	numShards, ok := processor.tryGetNumShardsFromObservers()
+	if ok {
+		log.Info("fetched the number of shards", "shards", numShards)
+		return numShards, nil
+	}
+
 	waitNodeTicker := time.NewTicker(processor.timeBetweenNodesRequests)
+	defer waitNodeTicker.Stop()
+
+	timeoutTimer := time.NewTimer(processor.numShardsTimeout)
+	defer timeoutTimer.Stop()
+
 	for {
 		select {
 		case <-waitNodeTicker.C:
-			for _, observerAddress := range processor.observers {
-				numShards, httpStatus := processor.tryGetnumShardsFromObserver(observerAddress)
-				if httpStatus == http.StatusOK {
-					log.Info("fetched the number of shards", "shards", numShards)
-					return numShards, nil
-				}
+			numShards, ok := processor.tryGetNumShardsFromObservers()
+			if ok {
+				log.Info("fetched the number of shards", "shards", numShards)
+				return numShards, nil
 			}
-		case <-time.After(processor.numShardsTimeout):
+		case <-timeoutTimer.C:
 			return 0, fmt.Errorf("%w, no observer online", errTimeIsOut)
 		case <-ctx.Done():
 			log.Debug("closing the getNetworkNumShards loop due to context done...")
 			return 0, errTimeIsOut
 		}
 	}
+}
+
+func (processor *numShardsProcessor) tryGetNumShardsFromObservers() (uint32, bool) {
+	for _, observerAddress := range processor.observers {
+		numShards, httpStatus := processor.tryGetnumShardsFromObserver(observerAddress)
+		if httpStatus == http.StatusOK {
+			return numShards, true
+		}
+	}
+
+	return 0, false
 }
 
 func (processor *numShardsProcessor) tryGetnumShardsFromObserver(observerAddress string) (uint32, int) {
@@ -128,7 +147,7 @@ func (processor *numShardsProcessor) tryGetnumShardsFromObserver(observerAddress
 		return 0, resp.StatusCode
 	}
 
-	responseBodyBytes, err := io.ReadAll(resp.Body)
+	responseBodyBytes, err := readResponseBodyLimited(resp.Body)
 	if err != nil {
 		return 0, http.StatusInternalServerError
 	}

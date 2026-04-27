@@ -83,6 +83,7 @@ type NodeFacadeHandler interface {
 // StatusFacadeHandler interface defines methods that can be used from the facade
 type StatusFacadeHandler interface {
 	GetMetrics() map[string]*data.EndpointMetrics
+	GetDRWAMetrics() map[string]uint64
 	GetMetricsForPrometheus() string
 }
 

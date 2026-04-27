@@ -69,6 +69,7 @@ type FacadeStub struct {
 	GetESDTsRolesCalled                          func(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
 	GetESDTSupplyCalled                          func(token string) (*data.ESDTSupplyResponse, error)
 	GetMetricsCalled                             func() map[string]*data.EndpointMetrics
+	GetDRWAMetricsCalled                         func() map[string]uint64
 	GetPrometheusMetricsCalled                   func() string
 	GetGenesisNodesPubKeysCalled                 func() (*data.GenericAPIResponse, error)
 	GetGasConfigsCalled                          func() (*data.GenericAPIResponse, error)
@@ -494,6 +495,11 @@ func (f *FacadeStub) GetHyperBlockByNonce(nonce uint64, options common.Hyperbloc
 // GetMetrics -
 func (f *FacadeStub) GetMetrics() map[string]*data.EndpointMetrics {
 	return f.GetMetricsCalled()
+}
+
+// GetDRWAMetrics -
+func (f *FacadeStub) GetDRWAMetrics() map[string]uint64 {
+	return f.GetDRWAMetricsCalled()
 }
 
 // GetMetricsForPrometheus -

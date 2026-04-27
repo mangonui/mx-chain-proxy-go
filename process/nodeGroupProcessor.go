@@ -208,7 +208,7 @@ func (ngp *NodeGroupProcessor) StartCacheUpdate() {
 	var ctx context.Context
 	ctx, ngp.cancelFunc = context.WithCancel(context.Background())
 
-	go func(ctx context.Context) {
+	runGuardedBackgroundTask("NodeGroupProcessor.StartCacheUpdate", func() {
 		timer := time.NewTimer(ngp.cacheValidityDuration)
 		defer timer.Stop()
 
@@ -225,7 +225,7 @@ func (ngp *NodeGroupProcessor) StartCacheUpdate() {
 				return
 			}
 		}
-	}(ctx)
+	})
 }
 
 func (ngp *NodeGroupProcessor) handleHeartbeatCacheUpdate() {

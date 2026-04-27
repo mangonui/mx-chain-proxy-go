@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -15,6 +17,9 @@ import (
 	"github.com/multiversx/mx-chain-core-go/hashing"
 	"github.com/multiversx/mx-chain-core-go/hashing/factory"
 	"github.com/multiversx/mx-chain-core-go/hashing/sha256"
+	crypto "github.com/multiversx/mx-chain-crypto-go"
+	"github.com/multiversx/mx-chain-crypto-go/signing"
+	"github.com/multiversx/mx-chain-crypto-go/signing/ed25519"
 	logger "github.com/multiversx/mx-chain-logger-go"
 	"github.com/multiversx/mx-chain-proxy-go/api/middleware"
 	"github.com/multiversx/mx-chain-proxy-go/config"
@@ -48,7 +53,7 @@ func CreateServer(
 		return nil, err
 	}
 
-	err = registerRoutes(ws, versionsRegistry, apiLoggingConfig, credentialsConfig, statusMetricsExtractor, rateLimitTimeWindowInSeconds, isProfileModeActivated, shouldStartSwaggerUI)
+	resetLoopCancels, err := registerRoutes(ws, versionsRegistry, apiLoggingConfig, credentialsConfig, statusMetricsExtractor, rateLimitTimeWindowInSeconds, isProfileModeActivated, shouldStartSwaggerUI)
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +61,9 @@ func CreateServer(
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: ws,
+	}
+	for _, cancel := range resetLoopCancels {
+		httpServer.RegisterOnShutdown(cancel)
 	}
 
 	return httpServer, nil
@@ -85,11 +93,12 @@ func registerRoutes(
 	rateLimitTimeWindowInSeconds int,
 	isProfileModeActivated bool,
 	shouldStartSwaggerUI bool,
-) error {
+) ([]func(), error) {
 	versionsMap, err := versionsRegistry.GetAllVersions()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	resetLoopCancels := make([]func(), 0)
 
 	if shouldStartSwaggerUI {
 		ws.Use(static.ServeRoot("/", "config/swagger"))
@@ -103,7 +112,7 @@ func registerRoutes(
 	// TODO: maybe add a flag when starting proxy if metrics should be exposed or not
 	metricsMiddleware, err := middleware.NewMetricsMiddleware(statusMetricsExtractor)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for version, versionData := range versionsMap {
@@ -111,9 +120,10 @@ func registerRoutes(
 		rateLimitTimeWindowDuration := time.Duration(rateLimitTimeWindowInSeconds) * time.Second
 		rateLimiter, err := middleware.NewRateLimiter(limitsMap, rateLimitTimeWindowDuration)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		startRateLimiterReset(rateLimitTimeWindowInSeconds, rateLimiter, version)
+		stopRateLimiterReset := startRateLimiterReset(rateLimitTimeWindowInSeconds, rateLimiter, version)
+		resetLoopCancels = append(resetLoopCancels, stopRateLimiterReset)
 		versionGroup := ws.Group(version)
 		for path, group := range versionData.ApiHandler.GetAllGroups() {
 			subGroup := versionGroup.Group(path)
@@ -131,7 +141,7 @@ func registerRoutes(
 		pprof.Register(ws)
 	}
 
-	return nil
+	return resetLoopCancels, nil
 }
 
 func getAuthenticationFunc(credentialsConfig config.CredentialsConfig) gin.HandlerFunc {
@@ -182,7 +192,7 @@ func getAuthenticationFunc(credentialsConfig config.CredentialsConfig) gin.Handl
 			return
 		}
 
-		if userPassword != hex.EncodeToString(hasher.Compute(pass)) {
+		if !constantTimeStringEquals(userPassword, hex.EncodeToString(hasher.Compute(pass))) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, data.GenericAPIResponse{
 				Data:  nil,
 				Error: "invalid password",
@@ -209,24 +219,60 @@ func getLimitsMapForVersion(versionData *data.VersionData) map[string]uint64 {
 	return limitsMap
 }
 
-func startRateLimiterReset(rateLimiterDuration int, rl middleware.RateLimiterHandler, version string) {
+func startRateLimiterReset(rateLimiterDuration int, rl middleware.RateLimiterHandler, version string) func() {
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
+		ticker := time.NewTicker(time.Duration(rateLimiterDuration) * time.Second)
+		defer ticker.Stop()
+
 		for {
-			time.Sleep(time.Duration(rateLimiterDuration) * time.Second)
-			rl.ResetMap(version)
+			select {
+			case <-ticker.C:
+				rl.ResetMap(version)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
+
+	return cancel
 }
 
 // skValidator validates a secret key from user input for correctness
 func skValidator(
 	_ *validator.Validate,
-	_ reflect.Value,
+	field reflect.Value,
 	_ reflect.Value,
 	_ reflect.Value,
 	_ reflect.Type,
-	_ reflect.Kind,
+	kind reflect.Kind,
 	_ string,
 ) bool {
-	return true
+	if kind != reflect.String {
+		return false
+	}
+
+	return isValidSecretKeyHex(field.String())
+}
+
+func constantTimeStringEquals(provided string, expected string) bool {
+	if len(provided) != len(expected) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func isValidSecretKeyHex(secretKey string) bool {
+	keyBytes, err := hex.DecodeString(secretKey)
+	if err != nil {
+		return false
+	}
+
+	_, err = newSecretKeyGenerator().PrivateKeyFromByteArray(keyBytes)
+	return err == nil
+}
+
+func newSecretKeyGenerator() crypto.KeyGenerator {
+	return signing.NewKeyGenerator(ed25519.NewEd25519())
 }

@@ -1,10 +1,10 @@
 package process
 
 import (
+	cryptoRand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
-	"math/rand"
 	"sync"
 
 	"github.com/multiversx/mx-chain-core-go/core"
@@ -180,6 +180,10 @@ func (fp *FaucetProcessor) getPrivKeyFromShard(shardID uint32) (crypto.PrivateKe
 		return nil, ErrNoFaucetAccountForGivenShard
 	}
 
-	randomPrivKeyIdx := rand.Intn(len(accountsInShard))
+	randomPrivKeyBig, err := cryptoRand.Int(cryptoRand.Reader, big.NewInt(int64(len(accountsInShard))))
+	if err != nil {
+		return nil, err
+	}
+	randomPrivKeyIdx := int(randomPrivKeyBig.Int64())
 	return fp.accMapByShard[shardID][randomPrivKeyIdx], nil
 }

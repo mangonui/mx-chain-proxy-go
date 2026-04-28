@@ -59,8 +59,9 @@ func CreateServer(
 	}
 
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: ws,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           ws,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 	for _, cancel := range resetLoopCancels {
 		httpServer.RegisterOnShutdown(cancel)

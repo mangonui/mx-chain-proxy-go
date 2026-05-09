@@ -95,7 +95,7 @@ Routes = [
     { Name = "/send", Open = true, Secured = false, RateLimit = 0 },
     { Name = "/simulate", Open = true, Secured = false, RateLimit = 0 },
     { Name = "/send-multiple", Open = true, Secured = false, RateLimit = 0 },
-    { Name = "/send-user-funds", Open = true, Secured = false, RateLimit = 0 },
+    { Name = "/send-user-funds", Open = false, Secured = true, RateLimit = 1 },
     { Name = "/cost", Open = true, Secured = false, RateLimit = 0 },
     { Name = "/:txhash", Open = true, Secured = false, RateLimit = 0 },
     { Name = "/:txhash/status", Open = true, Secured = false, RateLimit = 0 },

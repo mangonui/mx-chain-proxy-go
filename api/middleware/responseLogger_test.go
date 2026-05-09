@@ -163,3 +163,24 @@ func TestResponseLoggerMiddleware_ShouldNotCallHandler(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.False(t, handlerWasCalled)
 }
+
+func TestPrepareLog_RedactsSensitiveFields(t *testing.T) {
+	t.Parallel()
+
+	logPayload := prepareLog(redactSensitiveFields(`{"password":"secret","privateKey":"key","keep":"value"}`))
+
+	assert.Contains(t, logPayload, `"password":"[REDACTED]"`)
+	assert.Contains(t, logPayload, `"privateKey":"[REDACTED]"`)
+	assert.NotContains(t, logPayload, "secret")
+	assert.NotContains(t, logPayload, "key")
+	assert.Contains(t, logPayload, `"keep":"value"`)
+}
+
+func TestPrepareLog_TruncatesBeforeLogging(t *testing.T) {
+	t.Parallel()
+
+	logPayload := prepareLog(strings.Repeat("a", maxLengthRequestOrResponse+10))
+
+	assert.Len(t, logPayload, maxLengthRequestOrResponse+3)
+	assert.True(t, strings.HasSuffix(logPayload, "..."))
+}

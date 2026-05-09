@@ -10,6 +10,8 @@ import (
 	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
+const maxBulkAccountsRequestItems = 1024
+
 type accountsGroup struct {
 	facade AccountsFacadeHandler
 	*baseGroup
@@ -123,6 +125,10 @@ func (group *accountsGroup) getAccounts(c *gin.Context) {
 	var addresses []string
 	err := c.ShouldBindJSON(&addresses)
 	if err != nil {
+		shared.RespondWithBadRequest(c, errors.ErrInvalidAddressesArray.Error())
+		return
+	}
+	if len(addresses) > maxBulkAccountsRequestItems {
 		shared.RespondWithBadRequest(c, errors.ErrInvalidAddressesArray.Error())
 		return
 	}

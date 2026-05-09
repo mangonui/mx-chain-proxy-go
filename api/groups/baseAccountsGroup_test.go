@@ -273,6 +273,26 @@ func TestGetAccount_FailsWhenInvalidRequest(t *testing.T) {
 	assert.Equal(t, accountsResponse.Error, apiErrors.ErrInvalidAddressesArray.Error())
 }
 
+func TestGetAccount_FailsWhenBulkRequestIsTooLarge(t *testing.T) {
+	t.Parallel()
+
+	facade := &mock.FacadeStub{}
+	addressGroup, err := groups.NewAccountsGroup(facade)
+	require.NoError(t, err)
+	ws := startProxyServer(addressGroup, addressPath)
+
+	reqAddresses := make([]string, 1025)
+	for idx := range reqAddresses {
+		reqAddresses[idx] = fmt.Sprintf("erd1%d", idx)
+	}
+	addressBytes, _ := json.Marshal(reqAddresses)
+	req, _ := http.NewRequest("POST", "/address/bulk", bytes.NewBuffer(addressBytes))
+	resp := httptest.NewRecorder()
+	ws.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
 func TestGetAccount_FailWhenFacadeGetAccountsFails(t *testing.T) {
 	t.Parallel()
 

@@ -3,7 +3,7 @@ package middleware
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ const (
 	prefixBadRequest           = "[bad request]"
 	prefixInternalError        = "[internal error]"
 	maxLengthRequestOrResponse = 400
+	maxLoggedBodyReadSize      = 4096
 )
 
 // TODO: remove this file and use the same middleware from mx-chain-go after it is merged
@@ -47,11 +48,15 @@ func (rlm *responseLoggerMiddleware) MiddlewareHandlerFunc() gin.HandlerFunc {
 
 		// read the body for logging purposes and restore it into the context
 		var bodyBytes []byte
-		if c.Request.Body != nil {
-			bodyBytes, _ = ioutil.ReadAll(c.Request.Body)
+		requestBodyString := ""
+		shouldReadRequestBody := c.Request.Body != nil && c.Request.ContentLength >= 0 && c.Request.ContentLength <= maxLoggedBodyReadSize
+		if shouldReadRequestBody {
+			bodyBytes, _ = io.ReadAll(c.Request.Body)
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			requestBodyString = redactSensitiveFields(string(bodyBytes))
+		} else if c.Request.Body != nil {
+			requestBodyString = "[request body omitted]"
 		}
-		c.Request.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
-		requestBodyString := string(bodyBytes)
 
 		bw := &bodyWriter{body: bytes.NewBufferString(""), ResponseWriter: c.Writer}
 		c.Writer = bw
@@ -64,7 +69,7 @@ func (rlm *responseLoggerMiddleware) MiddlewareHandlerFunc() gin.HandlerFunc {
 		shouldLogRequest := latency > rlm.thresholdDurationForLoggingRequest || c.Writer.Status() != http.StatusOK
 		if shouldLogRequest {
 			requestBodyString = prepareLog(requestBodyString)
-			responseBodyString := prepareLog(bw.body.String())
+			responseBodyString := prepareLog(redactSensitiveFields(bw.body.String()))
 			rlm.logRequestAndResponse(c, latency, status, requestBodyString, responseBodyString)
 		}
 	}
@@ -121,12 +126,66 @@ func prepareLog(str string) string {
 	return b.String()
 }
 
+func redactSensitiveFields(str string) string {
+	sensitiveFields := []string{"password", "passphrase", "mnemonic", "secretKey", "privateKey", "pem"}
+	redacted := str
+	for _, field := range sensitiveFields {
+		redacted = redactField(redacted, field)
+	}
+
+	return redacted
+}
+
+func redactField(str string, field string) string {
+	lower := strings.ToLower(str)
+	lowerField := strings.ToLower(field)
+	for {
+		idx := strings.Index(lower, `"`+lowerField+`"`)
+		if idx < 0 {
+			return str
+		}
+		colon := strings.Index(str[idx:], ":")
+		if colon < 0 {
+			return str
+		}
+		valueStart := idx + colon + 1
+		for valueStart < len(str) && unicode.IsSpace(rune(str[valueStart])) {
+			valueStart++
+		}
+		if valueStart >= len(str) || str[valueStart] != '"' {
+			return str
+		}
+		valueEnd := valueStart + 1
+		for valueEnd < len(str) {
+			if str[valueEnd] == '"' && str[valueEnd-1] != '\\' {
+				break
+			}
+			valueEnd++
+		}
+		if valueEnd >= len(str) {
+			return str
+		}
+		if str[valueStart:valueEnd+1] == `"[REDACTED]"` {
+			return str
+		}
+		str = str[:valueStart] + `"[REDACTED]"` + str[valueEnd+1:]
+		lower = strings.ToLower(str)
+	}
+}
+
 type bodyWriter struct {
 	gin.ResponseWriter
 	body *bytes.Buffer
 }
 
 func (w bodyWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
+	if w.body.Len() < maxLoggedBodyReadSize {
+		remaining := maxLoggedBodyReadSize - w.body.Len()
+		if len(b) > remaining {
+			_, _ = w.body.Write(b[:remaining])
+		} else {
+			_, _ = w.body.Write(b)
+		}
+	}
 	return w.ResponseWriter.Write(b)
 }

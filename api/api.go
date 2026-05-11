@@ -34,7 +34,14 @@ type validatorInput struct {
 	Validator validator.Func
 }
 
-// CreateServer creates a HTTP server
+// CreateServer creates a HTTP server.
+//
+// corsConfig governs the CORS policy applied to the gin engine. An
+// empty AllowedOrigins slice produces a restrictive (no cross-origin)
+// policy — this is the safe default. Operators opting into
+// permissive cross-origin behaviour must explicitly populate
+// AllowedOrigins (e.g. ["*"] for the legacy "allow everything"
+// behaviour).
 func CreateServer(
 	versionsRegistry data.VersionsRegistryHandler,
 	port int,
@@ -44,9 +51,10 @@ func CreateServer(
 	rateLimitTimeWindowInSeconds int,
 	isProfileModeActivated bool,
 	shouldStartSwaggerUI bool,
+	corsConfig config.CorsConfig,
 ) (*http.Server, error) {
 	ws := gin.Default()
-	ws.Use(cors.Default())
+	ws.Use(cors.New(buildCorsConfig(corsConfig)))
 
 	err := registerValidators()
 	if err != nil {
@@ -68,6 +76,34 @@ func CreateServer(
 	}
 
 	return httpServer, nil
+}
+
+// buildCorsConfig translates the proxy's CorsConfig into a gin-contrib
+// cors.Config. Defaults are restrictive: empty AllowedOrigins yields a
+// no-cross-origin policy. Allowed methods default to safe-set GET/HEAD
+// /OPTIONS plus POST (the proxy's main endpoints). Allowed headers
+// default to the standard request headers needed for JSON.
+func buildCorsConfig(cfg config.CorsConfig) cors.Config {
+	c := cors.Config{
+		AllowOrigins:     cfg.AllowedOrigins,
+		AllowMethods:     cfg.AllowedMethods,
+		AllowHeaders:     cfg.AllowedHeaders,
+		AllowCredentials: cfg.AllowCredentials,
+	}
+	if len(c.AllowMethods) == 0 {
+		c.AllowMethods = []string{"GET", "POST", "HEAD", "OPTIONS"}
+	}
+	if len(c.AllowHeaders) == 0 {
+		c.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	}
+	if cfg.MaxAgeSeconds > 0 {
+		c.MaxAge = time.Duration(cfg.MaxAgeSeconds) * time.Second
+	}
+	// Backward compatibility: an empty AllowOrigins slice in
+	// gin-contrib/cors blocks all cross-origin traffic. That is the
+	// intended safe default — operators must opt into permissive
+	// behaviour explicitly via config.toml [Cors] AllowedOrigins.
+	return c
 }
 
 func registerValidators() error {

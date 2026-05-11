@@ -28,8 +28,30 @@ type Config struct {
 	Marshalizer            TypeConfig
 	Hasher                 TypeConfig
 	ApiLogging             ApiLoggingConfig
+	Cors                   CorsConfig
 	Observers              []*data.NodeData
 	FullHistoryNodes       []*data.NodeData
+}
+
+// CorsConfig configures the HTTP-layer Cross-Origin Resource Sharing
+// policy applied by api.CreateServer.
+//
+// Default behaviour (when AllowedOrigins is empty): cross-origin
+// requests are blocked. Operators who want backward-compatible
+// permissive behaviour must opt in by setting AllowedOrigins = ["*"]
+// in config.toml. This reverses the prior default of cors.Default()
+// (which silently allowed all origins with credentials enabled — a
+// real cross-origin info-leak surface for any browser-driven attacker
+// who could reach the proxy port).
+//
+// AllowCredentials defaults to false; only set true if explicit
+// authenticated cross-origin use cases require it.
+type CorsConfig struct {
+	AllowedOrigins   []string
+	AllowedMethods   []string
+	AllowedHeaders   []string
+	AllowCredentials bool
+	MaxAgeSeconds    int
 }
 
 // TypeConfig will map the string type configuration

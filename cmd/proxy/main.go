@@ -612,6 +612,7 @@ func startWebServer(
 		generalConfig.GeneralSettings.RateLimitWindowDurationSeconds,
 		isProfileModeActivated,
 		shouldStartSwaggerUI,
+		generalConfig.Cors,
 	)
 
 	if err != nil {

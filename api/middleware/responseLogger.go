@@ -111,6 +111,12 @@ func (rlm *responseLoggerMiddleware) printRequest(title string, path string, dur
 }
 
 func prepareLog(str string) string {
+	truncated := false
+	if len(str) > maxLengthRequestOrResponse {
+		str = str[:maxLengthRequestOrResponse]
+		truncated = true
+	}
+
 	var b strings.Builder
 	b.Grow(len(str))
 	for _, ch := range str {
@@ -120,10 +126,10 @@ func prepareLog(str string) string {
 	}
 
 	result := b.String()
-	if len(result) > maxLengthRequestOrResponse {
-		return result[:maxLengthRequestOrResponse] + "..."
+	if truncated {
+		return result + "..."
 	}
-	return b.String()
+	return result
 }
 
 func redactSensitiveFields(str string) string {

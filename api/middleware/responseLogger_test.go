@@ -184,3 +184,11 @@ func TestPrepareLog_TruncatesBeforeLogging(t *testing.T) {
 	assert.Len(t, logPayload, maxLengthRequestOrResponse+3)
 	assert.True(t, strings.HasSuffix(logPayload, "..."))
 }
+
+func TestPrepareLog_TruncatesBeforeWhitespaceCompaction(t *testing.T) {
+	t.Parallel()
+
+	logPayload := prepareLog(strings.Repeat(" ", maxLengthRequestOrResponse+10) + "payload")
+
+	assert.Equal(t, "...", logPayload)
+}

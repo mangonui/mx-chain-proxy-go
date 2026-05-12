@@ -55,6 +55,7 @@ func CreateServer(
 ) (*http.Server, error) {
 	ws := gin.Default()
 	ws.Use(cors.New(buildCorsConfig(corsConfig)))
+	ws.Use(middleware.RequestSizeLimiter(middleware.DefaultMaxRequestBodySize))
 
 	err := registerValidators()
 	if err != nil {

@@ -62,7 +62,7 @@ require (
 // imports github.com/multiversx/mx-chain-core-go/data/drwa which only
 // exists in the mangonui fork; upstream v1.4.0 / v1.5.0 lack that
 // package. This pin must match the other repos in the Fixes/ tree.
-replace github.com/multiversx/mx-chain-core-go => github.com/mangonui/mx-chain-core-go v0.0.0-20260511065402-576e93c1a0dc
+replace github.com/multiversx/mx-chain-core-go => github.com/mangonui/mx-chain-core-go v0.0.0-20260512153159-d696dc43bf6d
 
 replace github.com/multiversx/mx-chain-logger-go => github.com/mangonui/mx-chain-logger-go v0.0.0-20260512025801-4b00900c17b0
 
@@ -70,7 +70,7 @@ replace github.com/multiversx/mx-chain-crypto-go => github.com/mangonui/mx-chain
 
 replace github.com/multiversx/mx-chain-storage-go => github.com/mangonui/mx-chain-storage-go v0.0.0-20260512042020-b4fbd05cabe1
 
-replace github.com/multiversx/mx-chain-es-indexer-go => github.com/mangonui/mx-chain-es-indexer-go v0.0.0-20260512042141-92c0354a660d
+replace github.com/multiversx/mx-chain-es-indexer-go => github.com/mangonui/mx-chain-es-indexer-go v0.0.0-20260512154259-fed32aa38c74
 
 replace github.com/multiversx/mx-chain-communication-go => github.com/mangonui/mx-chain-communication-go v0.0.0-20260512042141-e5c2130b312d
 

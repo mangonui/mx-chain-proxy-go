@@ -669,14 +669,21 @@ func getNumOfShards(cfg *config.Config) (uint32, error) {
 }
 
 func removeLogColors() {
+	// Log-observer attach/detach is a stdout-formatting concern, not a
+	// liveness-critical subsystem. A transient failure should degrade
+	// (logs may keep ANSI colours / fail to reformat) rather than kill
+	// the proxy. See issues/ISSUE-021.
 	err := logger.RemoveLogObserver(os.Stdout)
 	if err != nil {
-		panic("error removing log observer: " + err.Error())
+		log.Error("could not remove default log observer; continuing with current log formatting",
+			"error", err)
+		return
 	}
 
 	err = logger.AddLogObserver(os.Stdout, &logger.PlainFormatter{})
 	if err != nil {
-		panic("error setting log observer: " + err.Error())
+		log.Error("could not install plain log observer; logs may not be reformatted as configured",
+			"error", err)
 	}
 }
 

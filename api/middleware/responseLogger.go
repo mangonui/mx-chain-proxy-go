@@ -51,9 +51,23 @@ func (rlm *responseLoggerMiddleware) MiddlewareHandlerFunc() gin.HandlerFunc {
 		requestBodyString := ""
 		shouldReadRequestBody := c.Request.Body != nil && c.Request.ContentLength >= 0 && c.Request.ContentLength <= maxLoggedBodyReadSize
 		if shouldReadRequestBody {
-			bodyBytes, _ = io.ReadAll(c.Request.Body)
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-			requestBodyString = redactSensitiveFields(string(bodyBytes))
+			var readErr error
+			bodyBytes, readErr = io.ReadAll(c.Request.Body)
+			if readErr != nil {
+				// ISSUE-037: log the failure rather than silently swallow.
+				// On partial / failed read we MUST NOT replace c.Request.Body
+				// with a truncated buffer — the downstream handler should see
+				// the same broken stream the read failed on, not a fabricated
+				// shorter body. Logging continues with whatever was captured.
+				log.Warn("response logger middleware: failed to read request body",
+					"error", readErr,
+					"path", c.Request.URL.Path,
+					"bytes_read", len(bodyBytes))
+				requestBodyString = "[request body read error]"
+			} else {
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				requestBodyString = redactSensitiveFields(string(bodyBytes))
+			}
 		} else if c.Request.Body != nil {
 			requestBodyString = "[request body omitted]"
 		}

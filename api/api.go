@@ -14,9 +14,7 @@ import (
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/multiversx/mx-chain-core-go/hashing"
 	"github.com/multiversx/mx-chain-core-go/hashing/factory"
-	"github.com/multiversx/mx-chain-core-go/hashing/sha256"
 	crypto "github.com/multiversx/mx-chain-crypto-go"
 	"github.com/multiversx/mx-chain-crypto-go/signing"
 	"github.com/multiversx/mx-chain-crypto-go/signing/ed25519"
@@ -153,6 +151,15 @@ func registerRoutes(
 		return nil, err
 	}
 
+	// ISSUE-030: compute the authentication handler once, fail-closed if
+	// the hasher config is invalid. Previously the helper silently fell
+	// back to SHA-256 on a bad config, leaving operators believing they
+	// had a stronger hash deployed.
+	authFunc, err := getAuthenticationFunc(credentialsConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	for version, versionData := range versionsMap {
 		limitsMap := getLimitsMapForVersion(versionData)
 		rateLimitTimeWindowDuration := time.Duration(rateLimitTimeWindowInSeconds) * time.Second
@@ -168,7 +175,7 @@ func registerRoutes(
 			group.RegisterRoutes(
 				subGroup,
 				versionData.ApiConfig,
-				getAuthenticationFunc(credentialsConfig),
+				authFunc,
 				rateLimiter.MiddlewareHandlerFunc(),
 				metricsMiddleware.MiddlewareHandlerFunc(),
 			)
@@ -182,8 +189,12 @@ func registerRoutes(
 	return resetLoopCancels, nil
 }
 
-func getAuthenticationFunc(credentialsConfig config.CredentialsConfig) gin.HandlerFunc {
+func getAuthenticationFunc(credentialsConfig config.CredentialsConfig) (gin.HandlerFunc, error) {
 	if len(credentialsConfig.Credentials) == 0 {
+		// Operator deliberately deployed without credentials — return a
+		// deny-all handler so any auth-requiring endpoint returns 500.
+		// Distinct from a misconfigured hasher: that condition fails the
+		// server start entirely (see below).
 		return func(c *gin.Context) {
 			c.AbortWithStatusJSON(
 				http.StatusInternalServerError,
@@ -193,15 +204,17 @@ func getAuthenticationFunc(credentialsConfig config.CredentialsConfig) gin.Handl
 					Code:  data.ReturnCodeInternalError,
 				},
 			)
-		}
+		}, nil
 	}
 
-	var hasher hashing.Hasher
-	var err error
-	hasher, err = factory.NewHasher(credentialsConfig.Hasher.Type)
+	// ISSUE-030: fail-closed on a bad hasher.Type. Previously this path
+	// silently fell back to SHA-256 with a Warn log, leaving operators
+	// believing they had argon2 (or similar) configured. Refusing to
+	// start makes the misconfiguration unmissable.
+	hasher, err := factory.NewHasher(credentialsConfig.Hasher.Type)
 	if err != nil {
-		log.Warn("cannot create hasher from config. Will use Sha256 as default", "error", err)
-		hasher = sha256.NewSha256() // fallback in case the hasher creation failed
+		return nil, fmt.Errorf("invalid hasher type %q in credentials config: %w",
+			credentialsConfig.Hasher.Type, err)
 	}
 
 	accounts := gin.Accounts{}
@@ -240,7 +253,7 @@ func getAuthenticationFunc(credentialsConfig config.CredentialsConfig) gin.Handl
 		}
 	}
 
-	return authenticationFunction
+	return authenticationFunction, nil
 }
 
 func getLimitsMapForVersion(versionData *data.VersionData) map[string]uint64 {

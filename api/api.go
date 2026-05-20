@@ -52,7 +52,9 @@ func CreateServer(
 	corsConfig config.CorsConfig,
 ) (*http.Server, error) {
 	ws := gin.Default()
-	ws.Use(cors.New(buildCorsConfig(corsConfig)))
+	if len(corsConfig.AllowedOrigins) > 0 {
+		ws.Use(cors.New(buildCorsConfig(corsConfig)))
+	}
 	ws.Use(middleware.RequestSizeLimiter(middleware.DefaultMaxRequestBodySize))
 
 	err := registerValidators()
@@ -78,10 +80,13 @@ func CreateServer(
 }
 
 // buildCorsConfig translates the proxy's CorsConfig into a gin-contrib
-// cors.Config. Defaults are restrictive: empty AllowedOrigins yields a
-// no-cross-origin policy. Allowed methods default to safe-set GET/HEAD
-// /OPTIONS plus POST (the proxy's main endpoints). Allowed headers
-// default to the standard request headers needed for JSON.
+// cors.Config. CreateServer only installs the middleware when
+// AllowedOrigins is populated; an empty list is handled by skipping CORS
+// registration entirely, which yields the restrictive no-cross-origin
+// default without triggering gin-contrib/cors validation panics.
+// Allowed methods default to safe-set GET/HEAD/OPTIONS plus POST (the
+// proxy's main endpoints). Allowed headers default to the standard
+// request headers needed for JSON.
 func buildCorsConfig(cfg config.CorsConfig) cors.Config {
 	c := cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
@@ -98,10 +103,6 @@ func buildCorsConfig(cfg config.CorsConfig) cors.Config {
 	if cfg.MaxAgeSeconds > 0 {
 		c.MaxAge = time.Duration(cfg.MaxAgeSeconds) * time.Second
 	}
-	// Backward compatibility: an empty AllowOrigins slice in
-	// gin-contrib/cors blocks all cross-origin traffic. That is the
-	// intended safe default — operators must opt into permissive
-	// behaviour explicitly via config.toml [Cors] AllowedOrigins.
 	return c
 }
 
